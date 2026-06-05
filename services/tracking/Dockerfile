@@ -3,6 +3,9 @@
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 ENV CI=true
+# OpenSSL is required by Prisma's engines (generate + migrate); slim images omit it.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json ./
 COPY prisma ./prisma
 # Strip workspace-protocol deps (e.g. the shared eslint-config) that npm cannot resolve in a
@@ -18,7 +21,7 @@ RUN npm prune --omit=dev
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN apt-get update && apt-get install -y --no-install-recommends dumb-init \
+RUN apt-get update && apt-get install -y --no-install-recommends dumb-init openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nodejs
