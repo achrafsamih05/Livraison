@@ -5,6 +5,9 @@ WORKDIR /app
 ENV CI=true
 COPY package.json ./
 COPY prisma ./prisma
+# Strip workspace-protocol deps (e.g. the shared eslint-config) that npm cannot resolve in a
+# standalone build context. They are lint-only and not needed to build or run the service.
+RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));for(const d of ['dependencies','devDependencies']){if(!p[d])continue;for(const k of Object.keys(p[d])){if(String(p[d][k]).startsWith('workspace:'))delete p[d][k];}}fs.writeFileSync('package.json',JSON.stringify(p,null,2));"
 RUN --mount=type=cache,target=/root/.npm npm install --no-audit --no-fund
 COPY tsconfig.json nest-cli.json ./
 COPY src ./src
