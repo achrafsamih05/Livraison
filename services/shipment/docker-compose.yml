@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livraison
+      POSTGRES_PASSWORD: livraison
+      POSTGRES_DB: shipment
+    ports:
+      - '5432:5432'
+    volumes:
+      - shipdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U livraison -d shipment']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  shipment:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      HTTP_PORT: 3002
+      DATABASE_URL: postgresql://livraison:livraison@postgres:5432/shipment?schema=public
+      AWB_PREFIX: LV
+      AWB_COUNTRY: SA
+    ports:
+      - '3002:3002'
+
+volumes:
+  shipdata:

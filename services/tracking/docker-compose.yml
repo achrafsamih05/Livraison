@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livraison
+      POSTGRES_PASSWORD: livraison
+      POSTGRES_DB: tracking
+    ports:
+      - '5432:5432'
+    volumes:
+      - trackingdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U livraison -d tracking']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tracking:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      HTTP_PORT: 3003
+      DATABASE_URL: postgresql://livraison:livraison@postgres:5432/tracking?schema=public
+    ports:
+      - '3003:3003'
+
+volumes:
+  trackingdata:

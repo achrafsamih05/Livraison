@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Livraison — Deployment Handbook</title>
+    <style>
+      :root {
+        --bg: #09090b;
+        --surface: #18181b;
+        --surface-2: #27272a;
+        --border: #2f2f35;
+        --text: #fafafa;
+        --muted: #a1a1aa;
+        --primary: #0c5cab;
+        --primary-2: #1f6cc1;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --radius: 10px;
+        --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --sans: "IBM Plex Sans", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.6;
+        font-size: 16px;
+      }
+      a { color: var(--primary-2); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .layout { display: grid; grid-template-columns: 300px 1fr; min-height: 100vh; }
+      nav.sidebar {
+        position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+        background: var(--surface); border-inline-end: 1px solid var(--border); padding: 24px 18px;
+      }
+      nav.sidebar .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      nav.sidebar .brand .logo {
+        width: 34px; height: 34px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--primary), var(--primary-2));
+        display: grid; place-items: center; font-weight: 800; color: #fff;
+      }
+      nav.sidebar .brand h1 { font-size: 18px; margin: 0; }
+      nav.sidebar .tag { color: var(--muted); font-size: 12px; margin: 0 0 18px 44px; }
+      nav.sidebar ol { list-style: none; margin: 0; padding: 0; counter-reset: sec; }
+      nav.sidebar ol li a {
+        display: block; padding: 7px 10px; border-radius: 7px; color: var(--muted);
+        font-size: 14px; counter-increment: sec;
+      }
+      nav.sidebar ol li a::before { content: counter(sec) ". "; color: #5b5b66; }
+      nav.sidebar ol li a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+      main { padding: 48px 56px; max-width: 1040px; }
+      header.hero { margin-bottom: 40px; }
+      header.hero h1 { font-size: 38px; margin: 0 0 8px; letter-spacing: -0.02em; }
+      header.hero p { color: var(--muted); font-size: 17px; margin: 0; }
+      .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+      .badge {
+        font-size: 12px; padding: 4px 10px; border-radius: 999px;
+        background: var(--surface-2); border: 1px solid var(--border); color: var(--muted);
+      }
+      .badge.ok { color: var(--success); border-color: rgba(16,185,129,.4); }
+      .badge.warn { color: var(--warning); border-color: rgba(245,158,11,.4); }
+      section.doc { border-top: 1px solid var(--border); padding: 38px 0; }
+      section.doc:first-of-type { border-top: none; }
+      section.doc h2 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+      section.doc h3 { font-size: 18px; margin: 26px 0 10px; color: #e7e7ea; }
+      section.doc h4 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+      p, li { color: #d4d4d8; }
+      code {
+        font-family: var(--mono); font-size: 13.5px;
+        background: var(--surface-2); padding: 2px 6px; border-radius: 5px; color: #e7e7ea;
+      }
+      pre {
+        background: #0c0c0f; border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.55;
+      }
+      pre code { background: none; padding: 0; color: #d7e3f4; }
+      table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+      th, td { text-align: start; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; background: var(--surface); }
+      tr:hover td { background: rgba(255,255,255,.015); }
+      .callout {
+        border-radius: var(--radius); padding: 14px 16px; margin: 16px 0; font-size: 14px;
+        border: 1px solid var(--border); background: var(--surface);
+      }
+      .callout.info { border-inline-start: 4px solid var(--primary-2); }
+      .callout.warn { border-inline-start: 4px solid var(--warning); }
+      .callout.danger { border-inline-start: 4px solid var(--danger); }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px;
+      }
+      .card h3 { margin-top: 0; }
+      .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+      .check { list-style: none; padding: 0; }
+      .check li { padding: 6px 0 6px 28px; position: relative; }
+      .check li::before {
+        content: "✓"; position: absolute; inset-inline-start: 0; top: 6px;
+        color: var(--success); font-weight: 700;
+      }
+      footer { color: #5b5b66; font-size: 13px; padding: 30px 0 60px; border-top: 1px solid var(--border); }
+      @media (max-width: 900px) {
+        .layout { grid-template-columns: 1fr; }
+        nav.sidebar { position: static; height: auto; border-inline-end: none; border-bottom: 1px solid var(--border); }
+        main { padding: 28px 20px; }
+        .grid2 { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Contents">
+        <div class="brand"><span class="logo">L</span><h1>Livraison</h1></div>
+        <p class="tag">Deployment Handbook · v1.0</p>
+        <ol>
+          <li><a href="#overview">Project Overview</a></li>
+          <li><a href="#architecture">Architecture Overview</a></li>
+          <li><a href="#stack">Technology Stack</a></li>
+          <li><a href="#env">Environment Variables</a></li>
+          <li><a href="#local">Local Development Setup</a></li>
+          <li><a href="#docker">Docker Deployment</a></li>
+          <li><a href="#vps">VPS Deployment</a></li>
+          <li><a href="#cloud">Cloud Deployment</a></li>
+          <li><a href="#db">Database Setup</a></li>
+          <li><a href="#cicd">CI/CD Guide</a></li>
+          <li><a href="#monitoring">Monitoring</a></li>
+          <li><a href="#backup">Backup &amp; Recovery</a></li>
+          <li><a href="#scaling">Scaling Guide</a></li>
+          <li><a href="#trouble">Troubleshooting</a></li>
+          <li><a href="#checklist">Production Checklist</a></li>
+        </ol>
+      </nav>
+
+      <main>
+        <header class="hero">
+          <h1>Livraison Deployment Handbook</h1>
+          <p>Enterprise logistics &amp; delivery platform — build, run, and operate the MVP stack.</p>
+          <div class="badges">
+            <span class="badge">Monorepo · pnpm + Turborepo</span>
+            <span class="badge">Next.js 14 · NestJS 10</span>
+            <span class="badge">PostgreSQL 16 · Redis 7</span>
+            <span class="badge ok">CI: lint · typecheck · test · build</span>
+            <span class="badge warn">MVP slice — not full platform</span>
+          </div>
+        </header>
+
+        <!-- 1 -->
+        <section class="doc" id="overview">
+          <h2>1. Project Overview</h2>
+          <p>
+            Livraison is a multi-tenant logistics platform. This handbook covers the <strong>implemented MVP slice</strong>:
+            three backend services, a PostgreSQL data layer, and three web portals, plus full container, CI/CD, and
+            single-host deployment automation.
+          </p>
+          <h3>Implemented components</h3>
+          <table>
+            <tr><th>Component</th><th>Type</th><th>Port</th><th>Purpose</th></tr>
+            <tr><td>identity</td><td>NestJS service</td><td>3001</td><td>Auth (JWT access+refresh), users, tenants, RBAC</td></tr>
+            <tr><td>shipment</td><td>NestJS service</td><td>3002</td><td>Shipment lifecycle, status workflow, tracking numbers</td></tr>
+            <tr><td>tracking</td><td>NestJS service</td><td>3003</td><td>Tracking events, timeline, public tracking, SSE, audit</td></tr>
+            <tr><td>core-db</td><td>Prisma data layer</td><td>—</td><td>Schema, migrations, Row-Level Security, seeds</td></tr>
+            <tr><td>web-merchant</td><td>Next.js app</td><td>3100</td><td>Merchant portal (ship, track, settle views)</td></tr>
+            <tr><td>web-admin</td><td>Next.js app</td><td>3101</td><td>Admin portal (users, tenants, shipments, audit)</td></tr>
+            <tr><td>web-driver</td><td>Next.js PWA</td><td>3102</td><td>Driver portal (offline-first deliveries, POD, GPS)</td></tr>
+          </table>
+          <div class="callout warn">
+            <strong>Scope honesty:</strong> the blueprint describes a FedEx-class platform (~28 services). This MVP
+            implements the core auth → shipment → tracking loop and three portals (~20–25% of the documented scope).
+            Present it as a working MVP with a roadmap, not the complete platform.
+          </div>
+        </section>
+
+        <!-- 2 -->
+        <section class="doc" id="architecture">
+          <h2>2. Architecture Overview</h2>
+          <p>Domain-aligned services with their own PostgreSQL databases. Web apps never talk to services directly from
+          the browser — each app has a server-side <strong>Backend-for-Frontend (BFF)</strong> that holds JWTs in an
+          httpOnly cookie and injects them into upstream calls.</p>
+          <pre><code>Browser
+  │  (httpOnly cookie session; no tokens in JS)
+  ▼
+Next.js app  ──BFF route handlers──▶  identity (3001)  ─▶  PostgreSQL: identity
+  (3100/3101/3102)                    shipment (3002)  ─▶  PostgreSQL: shipment
+                                      tracking (3003)  ─▶  PostgreSQL: tracking
+                                         │
+                                      Redis (sessions, revocation, idempotency)
+
+Nginx (host) terminates TLS and reverse-proxies the three apps + public API.
+Postgres &amp; Redis are NOT exposed to the network (internal only).</code></pre>
+          <h3>Key patterns</h3>
+          <ul>
+            <li><strong>Multi-tenancy:</strong> every row carries <code>tenant_id</code>; PostgreSQL Row-Level Security enforces isolation and <em>fails closed</em> when no tenant context is set.</li>
+            <li><strong>Auth:</strong> Argon2id passwords; short-lived JWT access token + rotating refresh token with reuse detection.</li>
+            <li><strong>Errors:</strong> RFC 7807 <code>application/problem+json</code> with stable codes and request IDs.</li>
+            <li><strong>Realtime:</strong> Server-Sent Events for live tracking updates.</li>
+            <li><strong>Offline (driver):</strong> IndexedDB durable outbox with idempotency keys + background sync.</li>
+          </ul>
+        </section>
+
+        <!-- 3 -->
+        <section class="doc" id="stack">
+          <h2>3. Technology Stack</h2>
+          <div class="grid2">
+            <div class="card">
+              <h3>Backend</h3>
+              <ul>
+                <li>NestJS 10 · TypeScript 5.5 (strict)</li>
+                <li>Prisma 5 · PostgreSQL 16 (PostGIS-ready)</li>
+                <li>Redis 7 (ioredis)</li>
+                <li>Argon2id · JWT (@nestjs/jwt)</li>
+                <li>Jest (unit) · class-validator</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Frontend</h3>
+              <ul>
+                <li>Next.js 14 (App Router, standalone output)</li>
+                <li>React 18 · TypeScript (strict)</li>
+                <li>Tailwind CSS · Radix UI (shadcn-style)</li>
+                <li>TanStack Query · React Hook Form · Zod</li>
+                <li>Zustand · next-themes · idb (driver PWA)</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Platform &amp; tooling</h3>
+              <ul>
+                <li>pnpm workspaces · Turborepo</li>
+                <li>ESLint (shared config) · Prettier</li>
+                <li>Vitest (design system, driver offline)</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>DevOps</h3>
+              <ul>
+                <li>Docker (multi-stage, non-root) · Compose</li>
+                <li>GitHub Actions (CI, security, docker, deploy)</li>
+                <li>Nginx + certbot (Let's Encrypt)</li>
+                <li>systemd timers (backup, health, monitor)</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4 -->
+        <section class="doc" id="env">
+          <h2>4. Environment Variables</h2>
+          <p>Every variable required by the stack. Secrets must be replaced before any non-development use.</p>
+
+          <h3>identity service</h3>
+          <table>
+            <tr><th>Variable</th><th>Example</th><th>Notes</th></tr>
+            <tr><td><code>APP_ENV</code></td><td>dev</td><td>dev | staging | prod | test</td></tr>
+            <tr><td><code>HTTP_PORT</code></td><td>3001</td><td>Listen port</td></tr>
+            <tr><td><code>DATABASE_URL</code></td><td>postgresql://user:pass@host:5432/identity?schema=public</td><td>Required</td></tr>
+            <tr><td><code>REDIS_URL</code></td><td>redis://host:6379</td><td>Sessions, revocation, idempotency</td></tr>
+            <tr><td><code>JWT_ACCESS_SECRET</code></td><td>(≥32 chars)</td><td>Required; <code>openssl rand -base64 48</code></td></tr>
+            <tr><td><code>JWT_REFRESH_SECRET</code></td><td>(≥32 chars)</td><td>Required; different from access</td></tr>
+            <tr><td><code>JWT_ACCESS_TTL</code></td><td>900</td><td>Seconds (15 min)</td></tr>
+            <tr><td><code>JWT_REFRESH_TTL</code></td><td>2592000</td><td>Seconds (30 days)</td></tr>
+            <tr><td><code>JWT_ISSUER</code></td><td>livraison-identity</td><td>Token issuer</td></tr>
+            <tr><td><code>JWT_AUDIENCE</code></td><td>livraison-platform</td><td>Token audience</td></tr>
+          </table>
+
+          <h3>shipment service</h3>
+          <table>
+            <tr><th>Variable</th><th>Example</th><th>Notes</th></tr>
+            <tr><td><code>APP_ENV</code></td><td>dev</td><td></td></tr>
+            <tr><td><code>HTTP_PORT</code></td><td>3002</td><td></td></tr>
+            <tr><td><code>DATABASE_URL</code></td><td>postgresql://user:pass@host:5432/shipment?schema=public</td><td>Required</td></tr>
+            <tr><td><code>AWB_PREFIX</code></td><td>LV</td><td>Tracking-number prefix</td></tr>
+            <tr><td><code>AWB_COUNTRY</code></td><td>SA</td><td>Tracking-number country suffix</td></tr>
+          </table>
+
+          <h3>tracking service</h3>
+          <table>
+            <tr><th>Variable</th><th>Example</th><th>Notes</th></tr>
+            <tr><td><code>APP_ENV</code></td><td>dev</td><td></td></tr>
+            <tr><td><code>HTTP_PORT</code></td><td>3003</td><td></td></tr>
+            <tr><td><code>DATABASE_URL</code></td><td>postgresql://user:pass@host:5432/tracking?schema=public</td><td>Required</td></tr>
+          </table>
+
+          <h3>web apps (merchant / admin / driver)</h3>
+          <table>
+            <tr><th>Variable</th><th>Example</th><th>Notes</th></tr>
+            <tr><td><code>IDENTITY_API_URL</code></td><td>http://identity:3001/api/v1</td><td>Server-side only</td></tr>
+            <tr><td><code>SHIPMENT_API_URL</code></td><td>http://shipment:3002/api/v1</td><td>Server-side only</td></tr>
+            <tr><td><code>TRACKING_API_URL</code></td><td>http://tracking:3003/api/v1</td><td>Server-side only</td></tr>
+            <tr><td><code>DEFAULT_TENANT_SLUG</code></td><td>demo</td><td>merchant/driver login tenant</td></tr>
+            <tr><td><code>ADMIN_TENANT_SLUG</code></td><td>platform</td><td>admin login tenant</td></tr>
+          </table>
+
+          <h3>compose / host (.env)</h3>
+          <table>
+            <tr><th>Variable</th><th>Example</th><th>Notes</th></tr>
+            <tr><td><code>POSTGRES_USER</code></td><td>livraison</td><td></td></tr>
+            <tr><td><code>POSTGRES_PASSWORD</code></td><td>(strong)</td><td>Replace in prod</td></tr>
+            <tr><td><code>REGISTRY_REPO</code></td><td>ghcr.io/your-org/livraison</td><td>Deploy compose image source</td></tr>
+            <tr><td><code>IMAGE_TAG</code></td><td>v1.0.0</td><td>Immutable deploy tag</td></tr>
+            <tr><td><code>DOMAIN</code></td><td>example.com</td><td>Root domain (subdomains derived)</td></tr>
+            <tr><td><code>ACME_EMAIL</code></td><td>ops@example.com</td><td>Let's Encrypt contact</td></tr>
+            <tr><td><code>BACKUP_DIR</code></td><td>/var/backups/livraison</td><td>Backup target</td></tr>
+            <tr><td><code>BACKUP_RETENTION_DAYS</code></td><td>14</td><td>Prune age</td></tr>
+            <tr><td><code>ALERT_WEBHOOK_URL</code></td><td>(Slack webhook)</td><td>Optional; logs to journal if empty</td></tr>
+            <tr><td><code>DISK_ALERT_THRESHOLD_PCT</code></td><td>85</td><td>Monitor alert threshold</td></tr>
+          </table>
+        </section>
+
+        <!-- 5 -->
+        <section class="doc" id="local">
+          <h2>5. Local Development Setup</h2>
+          <h4>Prerequisites (all OSes)</h4>
+          <p>Node.js 20.11+, pnpm 9 (via Corepack), Docker Desktop / Docker Engine, Git.</p>
+
+          <h3>Windows</h3>
+          <pre><code># PowerShell
+corepack enable
+corepack prepare pnpm@9.12.3 --activate
+git clone &lt;repo&gt; C:\livraison; cd C:\livraison
+pnpm install
+# start datastores only
+docker compose up -d postgres redis
+# generate Prisma clients
+pnpm --filter @livraison/identity exec prisma generate
+pnpm --filter @livraison/shipment exec prisma generate
+pnpm --filter @livraison/tracking exec prisma generate
+# run a service or app
+pnpm --filter @livraison/identity start:dev
+pnpm --filter @livraison/web-merchant dev</code></pre>
+
+          <h3>Linux</h3>
+          <pre><code>corepack enable &amp;&amp; corepack prepare pnpm@9.12.3 --activate
+git clone &lt;repo&gt; ~/livraison &amp;&amp; cd ~/livraison
+pnpm install
+docker compose up -d postgres redis
+pnpm -r exec prisma generate || true
+pnpm --filter @livraison/shipment start:dev</code></pre>
+
+          <h3>macOS</h3>
+          <pre><code>brew install node@20 pnpm
+git clone &lt;repo&gt; ~/livraison &amp;&amp; cd ~/livraison
+pnpm install
+docker compose up -d postgres redis
+pnpm --filter @livraison/web-driver dev   # PWA on :3102</code></pre>
+
+          <h4>Verify the toolchain</h4>
+          <pre><code>pnpm turbo run lint typecheck test build</code></pre>
+          <div class="callout info">Each service has its own <code>.env.example</code>; each app too. Copy to <code>.env</code> and adjust ports/URLs for local runs.</div>
+        </section>
+
+        <!-- 6 -->
+        <section class="doc" id="docker">
+          <h2>6. Docker Deployment</h2>
+          <h3>Full stack with Docker Compose</h3>
+          <pre><code>cp .env.docker.example .env      # set POSTGRES_PASSWORD, JWT secrets, tenant slugs
+docker compose up --build        # Postgres, Redis, 3 services, 3 apps</code></pre>
+          <p>Services run <code>prisma migrate deploy</code> on start, then boot. Endpoints:</p>
+          <table>
+            <tr><th>URL</th><th>Component</th></tr>
+            <tr><td>http://localhost:3100</td><td>Merchant portal</td></tr>
+            <tr><td>http://localhost:3101</td><td>Admin portal</td></tr>
+            <tr><td>http://localhost:3102</td><td>Driver PWA</td></tr>
+            <tr><td>http://localhost:3001/api/v1/health/ready</td><td>identity health</td></tr>
+            <tr><td>http://localhost:3002/api/v1/health/ready</td><td>shipment health</td></tr>
+            <tr><td>http://localhost:3003/api/v1/health/ready</td><td>tracking health</td></tr>
+          </table>
+          <h3>Building individual images</h3>
+          <pre><code># Backend (context = service dir)
+docker build -t livraison/identity:dev ./services/identity
+
+# Web app (context = repo root; needs workspace packages)
+docker build -t livraison/web-merchant:dev -f apps/web-merchant/Dockerfile .</code></pre>
+          <div class="callout info">Web images use Next.js <code>standalone</code> output with <code>outputFileTracingRoot</code> so only traced dependencies ship. All images run as a non-root user with <code>dumb-init</code> as PID 1.</div>
+        </section>
+
+        <!-- 7 -->
+        <section class="doc" id="vps">
+          <h2>7. VPS Deployment (Ubuntu / Debian)</h2>
+          <p>Single-host production deployment with Nginx + TLS, automated backups, and monitoring. Scripts live in
+          <code>infra/server/</code>.</p>
+          <h4>DNS</h4>
+          <p>Create A records for <code>merchant.</code>, <code>admin.</code>, <code>driver.</code>, and <code>api.</code> subdomains pointing to the host IP.</p>
+          <h4>Steps</h4>
+          <pre><code># As root on fresh Ubuntu 22.04/24.04 (Debian 12 equivalent):
+git clone &lt;repo&gt; /opt/livraison &amp;&amp; cd /opt/livraison
+
+# 1. Provision: Docker, Nginx, certbot, ufw, fail2ban, SSH hardening
+sudo bash infra/server/scripts/provision.sh
+
+# 2. Configure environment
+cp infra/server/env/.env.production.example /opt/livraison/.env
+sudoedit /opt/livraison/.env       # DOMAIN, secrets, REGISTRY_REPO, IMAGE_TAG
+chmod 600 /opt/livraison/.env
+
+# 3. Authenticate to the image registry
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+# 4. Nginx reverse proxy + TLS
+sudo bash infra/server/scripts/setup-nginx.sh
+sudo bash infra/server/scripts/setup-ssl.sh
+
+# 5. Deploy (pull images, migrate, roll out, health-gate)
+sudo bash infra/server/scripts/deploy.sh
+
+# 6. Backups + monitoring timers
+sudo bash infra/server/scripts/setup-backups.sh
+sudo bash infra/server/scripts/setup-monitoring.sh</code></pre>
+          <div class="callout warn">Debian: the same scripts work; ensure the Docker apt repo uses the Debian codename. ufw/fail2ban/certbot packages are identical.</div>
+          <h4>Update / rollback</h4>
+          <pre><code>sudoedit /opt/livraison/.env          # bump IMAGE_TAG
+sudo bash infra/server/scripts/deploy.sh
+sudo bash infra/server/scripts/rollback.sh v1.0.0</code></pre>
+        </section>
+
+        <!-- 8 -->
+        <section class="doc" id="cloud">
+          <h2>8. Cloud Deployment</h2>
+          <p>The stack is portable Docker. The simplest path on any VM provider is the VPS flow (Section 7). Below are
+          per-platform notes.</p>
+
+          <h3>AWS</h3>
+          <p><span class="pill">Requirements</span> Account, a VPC, an EC2 key pair, optional RDS/ElastiCache.</p>
+          <ul>
+            <li><strong>Setup:</strong> Launch an EC2 instance (t3.large+, Ubuntu 24.04); open 22/80/443 in the security group; allocate an Elastic IP; point DNS (Route 53) at it.</li>
+            <li><strong>Deploy:</strong> Follow Section 7 on the instance. For managed data, create RDS PostgreSQL 16 + ElastiCache Redis and set each service <code>DATABASE_URL</code>/<code>REDIS_URL</code> to those endpoints (then remove the postgres/redis services from the deploy compose).</li>
+          </ul>
+
+          <h3>Google Cloud</h3>
+          <ul>
+            <li><strong>Setup:</strong> Compute Engine VM (e2-standard-2, Ubuntu); firewall rules for 80/443; reserve a static IP; Cloud DNS records.</li>
+            <li><strong>Deploy:</strong> Section 7. For managed data use Cloud SQL (PostgreSQL 16) + Memorystore (Redis).</li>
+          </ul>
+
+          <h3>Azure</h3>
+          <ul>
+            <li><strong>Setup:</strong> Ubuntu VM (Standard_D2s_v5); NSG allow 22/80/443; public IP; Azure DNS.</li>
+            <li><strong>Deploy:</strong> Section 7. Managed data: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis.</li>
+          </ul>
+
+          <h3>DigitalOcean</h3>
+          <ul>
+            <li><strong>Setup:</strong> Droplet (2vCPU/4GB+, Ubuntu); reserved IP; DO DNS records.</li>
+            <li><strong>Deploy:</strong> Section 7. Optional DO Managed Databases (PostgreSQL/Redis).</li>
+          </ul>
+
+          <h3>Hetzner</h3>
+          <ul>
+            <li><strong>Setup:</strong> Cloud server (CX32+, Ubuntu); attach a primary IP; configure DNS at your registrar.</li>
+            <li><strong>Deploy:</strong> Section 7 (best price/performance for the single-host MVP).</li>
+          </ul>
+
+          <h3>Railway</h3>
+          <ul>
+            <li><strong>Requirements:</strong> Railway project; PostgreSQL + Redis plugins.</li>
+            <li><strong>Setup/Deploy:</strong> Create one service per Dockerfile (point at the repo + Dockerfile path; web apps use repo root as build context). Add the PostgreSQL and Redis plugins; map their connection strings into each service's variables. Set the web apps' <code>*_API_URL</code> to the internal service URLs.</li>
+          </ul>
+
+          <h3>Render</h3>
+          <ul>
+            <li><strong>Requirements:</strong> Render account; Render PostgreSQL + Key Value (Redis).</li>
+            <li><strong>Setup/Deploy:</strong> Create a Web Service per image (Docker runtime, Dockerfile path; root for web apps). Provision Render PostgreSQL (one DB per service or schemas) and Key Value; wire env vars. Health check path <code>/api/v1/health/ready</code> for services, <code>/login</code> for apps.</li>
+          </ul>
+
+          <h3>Fly.io</h3>
+          <ul>
+            <li><strong>Requirements:</strong> <code>flyctl</code>; Fly Postgres; Upstash Redis.</li>
+            <li><strong>Setup/Deploy:</strong> <code>fly launch</code> per service/app (one app each), set the Dockerfile and build context, <code>fly secrets set</code> for env, <code>fly postgres create</code> + <code>fly redis create</code> and attach. Use internal <code>.flycast</code> hostnames for inter-service <code>*_API_URL</code>.</li>
+          </ul>
+
+          <div class="callout info">On managed-data platforms, drop the bundled <code>postgres</code>/<code>redis</code> services and point each backend at the provider endpoint. Run <code>prisma migrate deploy</code> once per database (the service entrypoint already does this on boot).</div>
+        </section>
+
+        <!-- 9 -->
+        <section class="doc" id="db">
+          <h2>9. Database Setup</h2>
+          <h3>PostgreSQL</h3>
+          <p>PostgreSQL 16. Each backend owns its own database: <code>identity</code>, <code>shipment</code>, <code>tracking</code> (plus <code>livraison_core</code> for the core-db package). The compose init script creates them automatically from <code>POSTGRES_MULTIPLE_DATABASES</code>.</p>
+          <pre><code># Manual creation (managed PG without the init script):
+createdb identity; createdb shipment; createdb tracking
+
+# Apply migrations (run once per database; entrypoint also does this):
+pnpm --filter @livraison/identity exec prisma migrate deploy
+pnpm --filter @livraison/shipment exec prisma migrate deploy
+pnpm --filter @livraison/tracking exec prisma migrate deploy
+
+# Optional: seed reference data (permissions, roles, demo tenant/admin)
+pnpm --filter @livraison/core-db run seed</code></pre>
+          <div class="callout warn"><strong>Row-Level Security:</strong> the core-db layer enables forced RLS. The application must connect as a non-owner role and set <code>SET LOCAL app.tenant_id</code> inside each transaction. With no tenant context, queries return zero rows (fail-closed).</div>
+          <h3>Redis</h3>
+          <p>Redis 7, used by the identity service for sessions, access-token revocation, and idempotency keys. Set <code>REDIS_URL</code>. Append-only persistence is enabled in compose; for managed Redis, enable persistence/eviction per provider.</p>
+        </section>
+
+        <!-- 10 -->
+        <section class="doc" id="cicd">
+          <h2>10. CI/CD Guide</h2>
+          <p>Four GitHub Actions workflows in <code>.github/workflows/</code>.</p>
+          <table>
+            <tr><th>Workflow</th><th>Trigger</th><th>Does</th></tr>
+            <tr><td><code>ci.yml</code></td><td>push/PR to main</td><td>install → prisma generate → format check → typecheck → lint → test → build (Turbo)</td></tr>
+            <tr><td><code>security.yml</code></td><td>push/PR + weekly</td><td>pnpm audit, Trivy filesystem, gitleaks, CodeQL</td></tr>
+            <tr><td><code>docker.yml</code></td><td>push to main + <code>v*</code> tags</td><td>Matrix build &amp; push 6 images to GHCR + SBOM + provenance + Trivy image scan</td></tr>
+            <tr><td><code>deploy.yml</code></td><td>manual dispatch</td><td>Environment-gated SSH deploy: ship compose, pull, roll out, smoke check</td></tr>
+          </table>
+          <h4>Release flow</h4>
+          <pre><code>git tag v1.0.0 &amp;&amp; git push --tags     # docker.yml builds &amp; publishes images
+# In GitHub: Actions ▶ Deploy ▶ Run workflow ▶ environment=staging, ref=v1.0.0</code></pre>
+          <h4>Required deploy secrets (per Environment)</h4>
+          <p><code>DEPLOY_HOST</code>, <code>DEPLOY_USER</code>, <code>DEPLOY_PATH</code>, <code>DEPLOY_SSH_KEY</code>, <code>GHCR_USER</code>, <code>GHCR_TOKEN</code>. Docker publish uses the built-in <code>GITHUB_TOKEN</code>.</p>
+        </section>
+
+        <!-- 11 -->
+        <section class="doc" id="monitoring">
+          <h2>11. Monitoring</h2>
+          <h3>Logs</h3>
+          <pre><code>cd /opt/livraison &amp;&amp; docker compose logs -f identity   # per-service
+journalctl -t livraison-alert                          # alert history
+tail -f /var/log/nginx/access.log /var/log/nginx/error.log</code></pre>
+          <p>Docker JSON logs rotate at 10 MB × 5 (configured in <code>/etc/docker/daemon.json</code>).</p>
+          <h3>Health checks</h3>
+          <p>Every service exposes <code>/api/v1/health/live</code> and <code>/api/v1/health/ready</code> (the latter probes the DB). A systemd timer (<code>livraison-health.timer</code>, every 2 min) probes all components and restarts an unhealthy container once, then alerts.</p>
+          <pre><code>sudo bash infra/server/scripts/healthcheck.sh   # manual probe
+systemctl list-timers 'livraison-*'             # see schedules</code></pre>
+          <h3>Metrics</h3>
+          <p>Host resource monitor (<code>livraison-monitor.timer</code>, every 5 min) checks disk, memory, and container restart counts; alerts on breach via webhook or journal.</p>
+          <div class="callout info"><strong>Roadmap:</strong> application metrics (Prometheus), distributed tracing (OpenTelemetry), and log aggregation (Loki) are recommended before scaling beyond the single host.</div>
+        </section>
+
+        <!-- 12 -->
+        <section class="doc" id="backup">
+          <h2>12. Backup &amp; Recovery</h2>
+          <h3>Automated backups</h3>
+          <p>Nightly (02:30 UTC) via <code>livraison-backup.timer</code>: <code>pg_dump</code> of each database, gzip, optional <code>age</code> encryption, retention pruning to <code>BACKUP_RETENTION_DAYS</code>.</p>
+          <pre><code>sudo systemctl start livraison-backup.service   # run now
+ls -lh /var/backups/livraison                   # inspect dumps</code></pre>
+          <h3>Restore</h3>
+          <pre><code># DESTRUCTIVE: drops &amp; recreates objects in the target DB; requires typed confirm
+sudo bash infra/server/scripts/restore.sh shipment \
+  /var/backups/livraison/shipment-&lt;timestamp&gt;.sql.gz</code></pre>
+          <div class="callout danger"><strong>Verify restores.</strong> A backup is only real once test-restored. Restore into a scratch database monthly and confirm row counts and a few key queries.</div>
+        </section>
+
+        <!-- 13 -->
+        <section class="doc" id="scaling">
+          <h2>13. Scaling Guide</h2>
+          <table>
+            <tr><th>Pressure</th><th>First move</th><th>Next move</th></tr>
+            <tr><td>App CPU / requests</td><td>Run multiple app/service replicas behind Nginx <code>upstream</code></td><td>Move to Kubernetes with HPA</td></tr>
+            <tr><td>Database load</td><td>Managed Postgres + read replicas; PgBouncer pooling</td><td>Range-partition <code>tracking_events</code>/<code>shipments</code>; tenant sharding</td></tr>
+            <tr><td>Realtime fan-out</td><td>Single host: in-process SSE is fine</td><td>Back the SSE bus with Redis pub/sub or Kafka across replicas</td></tr>
+            <tr><td>Cross-service workflows</td><td>Direct calls (current)</td><td>Introduce the outbox + event backbone (Kafka)</td></tr>
+            <tr><td>Static/edge load</td><td>Put a CDN in front of the web apps</td><td>Edge caching for the public tracking page</td></tr>
+          </table>
+          <div class="callout warn">The MVP is single-host (a SPOF). Reaching the blueprint's volume targets requires managed data, partitioning, an event backbone, and orchestration — plan these as explicit milestones.</div>
+        </section>
+
+        <!-- 14 -->
+        <section class="doc" id="trouble">
+          <h2>14. Troubleshooting</h2>
+          <table>
+            <tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+            <tr><td>Deploy health gate fails</td><td>Migration error or bad env</td><td><code>docker compose logs &lt;service&gt;</code>; fix <code>.env</code>; redeploy</td></tr>
+            <tr><td>401 on every request</td><td>JWT secret mismatch / no session</td><td>Confirm identity <code>JWT_*</code> secrets; re-login; check cookie domain</td></tr>
+            <tr><td>Queries return 0 rows unexpectedly</td><td>RLS tenant context not set</td><td>Ensure the app sets <code>SET LOCAL app.tenant_id</code> per transaction and connects as the non-owner role</td></tr>
+            <tr><td>Portal 502 via Nginx</td><td>Upstream container down</td><td>Health timer restarts it; check container logs and ports</td></tr>
+            <tr><td>TLS renewal failed</td><td>Port 80 blocked or DNS wrong</td><td><code>certbot renew --dry-run</code>; verify A records + firewall</td></tr>
+            <tr><td>Driver actions not syncing</td><td>Offline / queued in outbox</td><td>Expected offline; they flush on reconnect (idempotent). Check the connectivity banner</td></tr>
+            <tr><td>Disk usage alert</td><td>Image/log/backup growth</td><td><code>docker image prune -af</code>; tune backup retention</td></tr>
+          </table>
+        </section>
+
+        <!-- 15 -->
+        <section class="doc" id="checklist">
+          <h2>15. Production Checklist</h2>
+          <div class="grid2">
+            <div class="card">
+              <h3>Before go-live</h3>
+              <ul class="check">
+                <li>All default secrets replaced (DB, JWT) with strong random values</li>
+                <li><code>.env</code> is <code>chmod 600</code>, never committed</li>
+                <li>DNS A records resolve for all four subdomains</li>
+                <li>TLS issued; <code>certbot renew --dry-run</code> passes</li>
+                <li>Migrations applied; seed run (or first admin created)</li>
+                <li>Staging deploy succeeded and smoke-checked</li>
+                <li>One backup taken and <em>test-restored</em></li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Security</h3>
+              <ul class="check">
+                <li>Firewall limited to 22/80/443; Postgres/Redis not exposed</li>
+                <li>SSH: root login + password auth disabled; fail2ban on</li>
+                <li>CI security scans green (audit, Trivy, gitleaks, CodeQL)</li>
+                <li>Public-tracking anti-enumeration enabled (roadmap item)</li>
+                <li>Secrets in a manager (Vault/KMS) for the next tier</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Reliability</h3>
+              <ul class="check">
+                <li>Health + monitor timers enabled</li>
+                <li>Backup timer enabled; retention set</li>
+                <li>Alert webhook configured</li>
+                <li>Rollback procedure tested (<code>rollback.sh</code>)</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Observability (recommended next)</h3>
+              <ul class="check">
+                <li>OpenTelemetry traces wired</li>
+                <li>Prometheus + Grafana dashboards</li>
+                <li>Centralized log aggregation</li>
+                <li>SLOs + error-budget alerts</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <footer>
+          Livraison Deployment Handbook — generated from verified project files. Single standalone HTML; no external
+          assets. Represent the system as an MVP slice plus roadmap, not the complete platform.
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,130 @@
+# Deployment compose: runs pre-built images from GHCR (no build on the host).
+# Consumed by .github/workflows/deploy.yml. Secrets/config are provided on the
+# target host via a sibling .env file (never committed).
+#
+# Required env on the host:
+#   REGISTRY_REPO  e.g. ghcr.io/org/livraison
+#   IMAGE_TAG      e.g. v1.2.3 or sha-<commit>
+#   POSTGRES_USER, POSTGRES_PASSWORD
+#   JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+#   DEFAULT_TENANT_SLUG, ADMIN_TENANT_SLUG
+
+name: livraison
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_MULTIPLE_DATABASES: identity,shipment,tracking
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: always
+
+  identity:
+    image: ${REGISTRY_REPO}/identity:${IMAGE_TAG}
+    command: ['sh', '-c', 'npx prisma migrate deploy && node dist/main.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      APP_ENV: production
+      HTTP_PORT: '3001'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/identity?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL: '900'
+      JWT_REFRESH_TTL: '2592000'
+      JWT_ISSUER: livraison-identity
+      JWT_AUDIENCE: livraison-platform
+    ports:
+      - '3001:3001'
+    restart: always
+
+  shipment:
+    image: ${REGISTRY_REPO}/shipment:${IMAGE_TAG}
+    command: ['sh', '-c', 'npx prisma migrate deploy && node dist/main.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      APP_ENV: production
+      HTTP_PORT: '3002'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/shipment?schema=public
+      AWB_PREFIX: LV
+      AWB_COUNTRY: SA
+    ports:
+      - '3002:3002'
+    restart: always
+
+  tracking:
+    image: ${REGISTRY_REPO}/tracking:${IMAGE_TAG}
+    command: ['sh', '-c', 'npx prisma migrate deploy && node dist/main.js']
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      APP_ENV: production
+      HTTP_PORT: '3003'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/tracking?schema=public
+    ports:
+      - '3003:3003'
+    restart: always
+
+  web-merchant:
+    image: ${REGISTRY_REPO}/web-merchant:${IMAGE_TAG}
+    depends_on: [identity, shipment, tracking]
+    environment:
+      IDENTITY_API_URL: http://identity:3001/api/v1
+      SHIPMENT_API_URL: http://shipment:3002/api/v1
+      TRACKING_API_URL: http://tracking:3003/api/v1
+      DEFAULT_TENANT_SLUG: ${DEFAULT_TENANT_SLUG}
+    ports:
+      - '3100:3100'
+    restart: always
+
+  web-admin:
+    image: ${REGISTRY_REPO}/web-admin:${IMAGE_TAG}
+    depends_on: [identity, shipment, tracking]
+    environment:
+      IDENTITY_API_URL: http://identity:3001/api/v1
+      SHIPMENT_API_URL: http://shipment:3002/api/v1
+      TRACKING_API_URL: http://tracking:3003/api/v1
+      DEFAULT_TENANT_SLUG: ${ADMIN_TENANT_SLUG}
+    ports:
+      - '3101:3101'
+    restart: always
+
+  web-driver:
+    image: ${REGISTRY_REPO}/web-driver:${IMAGE_TAG}
+    depends_on: [identity, shipment, tracking]
+    environment:
+      IDENTITY_API_URL: http://identity:3001/api/v1
+      SHIPMENT_API_URL: http://shipment:3002/api/v1
+      TRACKING_API_URL: http://tracking:3003/api/v1
+      DEFAULT_TENANT_SLUG: ${DEFAULT_TENANT_SLUG}
+    ports:
+      - '3102:3102'
+    restart: always
+
+volumes:
+  pgdata:
+  redisdata:

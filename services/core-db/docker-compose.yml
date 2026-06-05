@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livraison
+      POSTGRES_PASSWORD: livraison
+      POSTGRES_DB: livraison_core
+    ports:
+      - '5432:5432'
+    volumes:
+      - coredbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U livraison -d livraison_core']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  coredbdata:

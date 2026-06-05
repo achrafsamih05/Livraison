@@ -1,0 +1,8 @@
+[Unit]
+Description=Livraison host resource monitor (disk, memory, containers)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/livraison/infra/server/scripts/monitor.sh

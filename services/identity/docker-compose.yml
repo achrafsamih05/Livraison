@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: livraison
+      POSTGRES_PASSWORD: livraison
+      POSTGRES_DB: identity
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U livraison -d identity']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  identity:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: dev
+      HTTP_PORT: 3001
+      DATABASE_URL: postgresql://livraison:livraison@postgres:5432/identity?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-access-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: dev-refresh-secret-at-least-32-characters
+      JWT_ACCESS_TTL: '900'
+      JWT_REFRESH_TTL: '2592000'
+      JWT_ISSUER: livraison-identity
+      JWT_AUDIENCE: livraison-platform
+    ports:
+      - '3001:3001'
+
+volumes:
+  pgdata:
+  redisdata:

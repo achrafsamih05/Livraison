@@ -1,0 +1,113 @@
+import 'server-only';
+import type { ApiProblem } from '@/lib/types';
+import { readSession } from './session';
+
+/**
+ * Server-side HTTP client for upstream Livraison services.
+ *
+ * Runs only in route handlers / server components. Injects the bearer token
+ * and tenant context from the httpOnly session cookie, so the browser never
+ * handles credentials. Normalizes RFC 7807 problem responses into a typed
+ * error the BFF can relay with the same status code.
+ */
+export class UpstreamError extends Error {
+  constructor(
+    readonly status: number,
+    readonly problem: ApiProblem,
+  ) {
+    super(problem.detail || problem.title || 'Upstream error');
+    this.name = 'UpstreamError';
+  }
+}
+
+type Service = 'shipment' | 'tracking' | 'identity';
+
+function baseUrl(service: Service): string {
+  const map: Record<Service, string | undefined> = {
+    shipment: process.env.SHIPMENT_API_URL,
+    tracking: process.env.TRACKING_API_URL,
+    identity: process.env.IDENTITY_API_URL,
+  };
+  const url = map[service];
+  if (url === undefined || url === '') {
+    throw new Error(`Missing API base URL for service: ${service}`);
+  }
+  return url.replace(/\/$/, '');
+}
+
+export interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  body?: unknown;
+  /** When true, do not attach auth (used for the login call). */
+  anonymous?: boolean;
+  /** Extra headers (e.g., X-Tenant for login). */
+  headers?: Record<string, string>;
+  /** Next.js fetch caching; defaults to no-store for authenticated data. */
+  cache?: RequestCache;
+}
+
+export async function apiFetch<T>(
+  service: Service,
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  const { method = 'GET', body, anonymous = false, headers = {}, cache = 'no-store' } = options;
+
+  const finalHeaders: Record<string, string> = {
+    accept: 'application/json',
+    ...headers,
+  };
+  if (body !== undefined) {
+    finalHeaders['content-type'] = 'application/json';
+  }
+
+  if (!anonymous) {
+    const session = readSession();
+    if (session === null) {
+      throw new UpstreamError(401, {
+        status: 401,
+        code: 'UNAUTHENTICATED',
+        title: 'Unauthorized',
+        detail: 'No active session.',
+      });
+    }
+    finalHeaders.authorization = `Bearer ${session.accessToken}`;
+    finalHeaders['x-tenant-id'] = session.tenantId;
+    finalHeaders['x-actor-id'] = session.user.id;
+  }
+
+  const response = await fetch(`${baseUrl(service)}${path}`, {
+    method,
+    headers: finalHeaders,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    cache,
+  });
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  const data: unknown = text.length > 0 ? JSON.parse(text) : undefined;
+
+  if (!response.ok) {
+    const problem = normalizeProblem(response.status, data);
+    throw new UpstreamError(response.status, problem);
+  }
+
+  return data as T;
+}
+
+function normalizeProblem(status: number, data: unknown): ApiProblem {
+  if (typeof data === 'object' && data !== null) {
+    const obj = data as Record<string, unknown>;
+    return {
+      status: typeof obj.status === 'number' ? obj.status : status,
+      code: typeof obj.code === 'string' ? obj.code : 'ERROR',
+      title: typeof obj.title === 'string' ? obj.title : 'Error',
+      detail: typeof obj.detail === 'string' ? obj.detail : 'Request failed.',
+      errors: Array.isArray(obj.errors) ? (obj.errors as ApiProblem['errors']) : undefined,
+    };
+  }
+  return { status, code: 'ERROR', title: 'Error', detail: 'Request failed.' };
+}

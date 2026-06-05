@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+      ref:
+        description: Image tag to deploy (e.g. v1.2.3 or a commit SHA)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    # GitHub Environment provides required reviewers / approval gates and
+    # holds the per-environment secrets used below.
+    environment:
+      name: ${{ github.event.inputs.environment }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render compose deploy file
+        run: |
+          mkdir -p .deploy
+          cp infra/deploy/docker-compose.deploy.yml .deploy/docker-compose.yml
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Ship compose file
+        run: |
+          scp -i ~/.ssh/id_ed25519 .deploy/docker-compose.yml \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/docker-compose.yml"
+
+      - name: Pull and roll out
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.ref }}
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" bash -se <<'REMOTE'
+          set -euo pipefail
+          cd "${{ secrets.DEPLOY_PATH }}"
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
+          export IMAGE_TAG="${{ github.event.inputs.ref }}"
+          export REGISTRY_REPO="ghcr.io/${{ github.repository }}"
+          docker compose pull
+          docker compose up -d --remove-orphans
+          docker image prune -f
+          REMOTE
+
+      - name: Smoke check
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            'curl -fsS http://localhost:3001/api/v1/health/ready >/dev/null && echo "identity healthy"'

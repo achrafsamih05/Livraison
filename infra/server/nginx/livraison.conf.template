@@ -1,0 +1,152 @@
+# Livraison reverse proxy site.
+#
+# This is a template: setup-nginx.sh substitutes ${DOMAIN} and installs the
+# result to /etc/nginx/sites-available/livraison.conf. TLS certificate paths
+# are populated by setup-ssl.sh (certbot --nginx) on first run.
+#
+# Subdomains:
+#   merchant.${DOMAIN}  -> web-merchant (3100), /api/* -> backend services
+#   admin.${DOMAIN}     -> web-admin    (3101), /api/* -> backend services
+#   driver.${DOMAIN}    -> web-driver   (3102), /api/* -> backend services
+#   api.${DOMAIN}       -> backend services directly (public tracking, integrations)
+
+# WebSocket/SSE upgrade map (used by proxy-params.conf).
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+# Per-IP rate limiting zones.
+limit_req_zone $binary_remote_addr zone=api_zone:10m rate=20r/s;
+limit_req_zone $binary_remote_addr zone=auth_zone:10m rate=5r/s;
+
+# --- HTTP: ACME challenge + redirect to HTTPS ---
+server {
+  listen 80;
+  listen [::]:80;
+  server_name merchant.${DOMAIN} admin.${DOMAIN} driver.${DOMAIN} api.${DOMAIN};
+
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# --- Merchant portal ---
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name merchant.${DOMAIN};
+
+  ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+  include /etc/nginx/snippets/livraison-security-headers.conf;
+
+  client_max_body_size 15m;
+
+  location /api/ {
+    limit_req zone=api_zone burst=40 nodelay;
+    proxy_pass http://127.0.0.1:3100;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3100;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+}
+
+# --- Admin portal ---
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name admin.${DOMAIN};
+
+  ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+  include /etc/nginx/snippets/livraison-security-headers.conf;
+
+  client_max_body_size 15m;
+
+  location /api/auth/ {
+    limit_req zone=auth_zone burst=10 nodelay;
+    proxy_pass http://127.0.0.1:3101;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3101;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+}
+
+# --- Driver portal (PWA) ---
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name driver.${DOMAIN};
+
+  ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+  include /etc/nginx/snippets/livraison-security-headers.conf;
+
+  client_max_body_size 25m; # POD photos
+
+  # Never cache the service worker.
+  location = /sw.js {
+    proxy_pass http://127.0.0.1:3102;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3102;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+}
+
+# --- Public API (tracking, integrations) ---
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  http2 on;
+  server_name api.${DOMAIN};
+
+  ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+  include /etc/nginx/snippets/livraison-security-headers.conf;
+
+  client_max_body_size 10m;
+
+  # Route /api/v1/<service-prefixed> to the right backend.
+  location /shipment/ {
+    limit_req zone=api_zone burst=40 nodelay;
+    rewrite ^/shipment/(.*)$ /api/v1/$1 break;
+    proxy_pass http://127.0.0.1:3002;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+
+  location /tracking/ {
+    limit_req zone=api_zone burst=40 nodelay;
+    rewrite ^/tracking/(.*)$ /api/v1/$1 break;
+    proxy_pass http://127.0.0.1:3003;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+
+  location /identity/ {
+    limit_req zone=auth_zone burst=10 nodelay;
+    rewrite ^/identity/(.*)$ /api/v1/$1 break;
+    proxy_pass http://127.0.0.1:3001;
+    include /etc/nginx/snippets/livraison-proxy-params.conf;
+  }
+
+  location = / {
+    return 404;
+  }
+}

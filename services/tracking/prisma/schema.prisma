@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Mirrors the shipment lifecycle so tracking can synchronize and project the
+/// current status from the latest status-bearing event.
+enum ShipmentStatus {
+  CREATED
+  PICKUP_PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNED
+  CANCELLED
+}
+
+enum TrackingEventType {
+  CREATED
+  PICKUP_SCHEDULED
+  PICKED_UP
+  ARRIVED_AT_HUB
+  DEPARTED_HUB
+  ARRIVED_AT_BRANCH
+  OUT_FOR_DELIVERY
+  DELIVERY_ATTEMPTED
+  DELIVERED
+  FAILED
+  RETURNED
+  HELD
+  EXCEPTION
+  CANCELLED
+  NOTE
+}
+
+enum EventSource {
+  SYSTEM
+  DRIVER_APP
+  WAREHOUSE
+  PARTNER
+  CUSTOMER
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  SYNC
+}
+
+/// Append-only tracking events. The source of truth for a shipment's journey.
+/// `statusAfter` is set when an event drives a lifecycle status change, which
+/// powers status synchronization and the current-status projection.
+model TrackingEvent {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String            @map("tenant_id") @db.Uuid
+  shipmentId  String            @map("shipment_id") @db.Uuid
+  trackingNumber String         @map("tracking_number")
+  type        TrackingEventType
+  source      EventSource       @default(SYSTEM)
+  statusAfter ShipmentStatus?   @map("status_after")
+  description String?
+  location    String?
+  latitude    Decimal?          @db.Decimal(9, 6)
+  longitude   Decimal?          @db.Decimal(9, 6)
+  actorId     String?           @map("actor_id") @db.Uuid
+  isPublic    Boolean           @default(true) @map("is_public")
+  metadata    Json              @default("{}")
+  occurredAt  DateTime          @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([tenantId, shipmentId, occurredAt])
+  @@index([tenantId, trackingNumber, occurredAt])
+  @@index([shipmentId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+  @@map("tracking_events")
+}
+
+/// One row per shipment holding the projected current status and the latest
+/// event reference. Maintained transactionally with event creation so reads
+/// and status synchronization are O(1).
+model ShipmentTrackingState {
+  shipmentId     String         @id @map("shipment_id") @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  trackingNumber String         @map("tracking_number")
+  currentStatus  ShipmentStatus @map("current_status")
+  lastEventId    String?        @map("last_event_id") @db.Uuid
+  lastEventType  TrackingEventType? @map("last_event_type")
+  lastOccurredAt DateTime       @map("last_occurred_at") @db.Timestamptz(6)
+  eventCount     Int            @default(0) @map("event_count")
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([tenantId, trackingNumber])
+  @@index([tenantId, currentStatus])
+  @@map("shipment_tracking_state")
+}
+
+/// Audit trail for tracking-domain actions (event creation, status sync, and
+/// sensitive reads such as public lookups). Append-only.
+model TrackingAuditLog {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String?     @map("tenant_id") @db.Uuid
+  action       AuditAction
+  shipmentId   String?     @map("shipment_id") @db.Uuid
+  trackingNumber String?   @map("tracking_number")
+  actorId      String?     @map("actor_id") @db.Uuid
+  actorType    String      @default("system") @map("actor_type")
+  detail       Json        @default("{}")
+  ipAddress    String?     @map("ip_address")
+  requestId    String?     @map("request_id")
+  occurredAt   DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  @@index([tenantId, occurredAt])
+  @@index([shipmentId, occurredAt])
+  @@index([action, occurredAt])
+  @@map("tracking_audit_logs")
+}

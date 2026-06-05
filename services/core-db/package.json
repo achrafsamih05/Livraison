@@ -1,0 +1,32 @@
+{
+  "name": "@livraison/core-db",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Livraison core PostgreSQL data layer: schema, migrations, RLS, and seeds.",
+  "scripts": {
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:format": "prisma format",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:diff": "prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
+    "seed": "ts-node --transpile-only prisma/seed.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf generated .turbo"
+  },
+  "prisma": {
+    "seed": "ts-node --transpile-only prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "5.20.0",
+    "argon2": "0.41.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "prisma": "5.20.0",
+    "rimraf": "6.0.1",
+    "ts-node": "10.9.2",
+    "typescript": "5.5.4"
+  }
+}

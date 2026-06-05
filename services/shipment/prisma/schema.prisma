@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Shipment lifecycle statuses. CANCELLED is included to support the cancel
+/// feature; it is a terminal state reachable from pre-transit states only.
+enum ShipmentStatus {
+  CREATED
+  PICKUP_PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNED
+  CANCELLED
+}
+
+enum ServiceLevel {
+  SAME_DAY
+  NEXT_DAY
+  EXPRESS
+  STANDARD
+  ECONOMY
+}
+
+model Shipment {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  trackingNumber String        @map("tracking_number")
+  status        ShipmentStatus @default(CREATED)
+  service       ServiceLevel   @default(STANDARD)
+
+  senderName     String  @map("sender_name")
+  senderPhone    String  @map("sender_phone")
+  senderLine1    String  @map("sender_line1")
+  senderCity     String  @map("sender_city")
+  senderCountry  String  @map("sender_country") @db.Char(2)
+
+  recipientName    String @map("recipient_name")
+  recipientPhone   String @map("recipient_phone")
+  recipientLine1   String @map("recipient_line1")
+  recipientCity    String @map("recipient_city")
+  recipientCountry String @map("recipient_country") @db.Char(2)
+
+  weightGrams   Int     @default(0) @map("weight_grams")
+  codAmount     Decimal @default(0) @map("cod_amount") @db.Decimal(19, 4)
+  declaredValue Decimal @default(0) @map("declared_value") @db.Decimal(19, 4)
+  currency      String  @default("SAR") @db.Char(3)
+  reference     String?
+  notes         String?
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+
+  history ShipmentStatusHistory[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("shipments")
+}
+
+/// Immutable, append-only audit of every status transition.
+model ShipmentStatusHistory {
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String          @map("tenant_id") @db.Uuid
+  shipmentId String          @map("shipment_id") @db.Uuid
+  fromStatus ShipmentStatus? @map("from_status")
+  toStatus   ShipmentStatus  @map("to_status")
+  reason     String?
+  actorId    String?         @map("actor_id") @db.Uuid
+  occurredAt DateTime        @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shipmentId, occurredAt])
+  @@index([shipmentId, occurredAt])
+  @@map("shipment_status_history")
+}

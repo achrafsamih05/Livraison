@@ -1,0 +1,463 @@
+// Livraison core data layer.
+// Conventions:
+//  - UUID primary keys (application-generated UUIDv4/v7 acceptable; DB default gen_random_uuid()).
+//  - Multi-tenancy: every tenant-owned table carries tenant_id; RLS enforced (see migrations).
+//  - Soft delete: deleted_at timestamp; partial unique indexes ignore soft-deleted rows.
+//  - Audit fields: created_at, updated_at, created_by, updated_by, deleted_at, deleted_by.
+//  - snake_case table/column names via @map / @@map.
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../generated/client"
+  binaryTargets = ["native"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum AddressType {
+  SENDER
+  RECIPIENT
+  PICKUP
+  RETURN
+  BRANCH
+  WAREHOUSE
+}
+
+enum ShipmentStatus {
+  DRAFT
+  VALIDATED
+  PRICED
+  LABELED
+  MANIFESTED
+  AWAITING_PICKUP
+  PICKED_UP
+  IN_TRANSIT
+  AT_HUB
+  OUT_FOR_DELIVERY
+  DELIVERED
+  FAILED
+  RETURNED
+  CANCELLED
+  LOST
+  DAMAGED
+}
+
+enum ServiceLevel {
+  SAME_DAY
+  NEXT_DAY
+  EXPRESS
+  STANDARD
+  ECONOMY
+}
+
+enum TrackingEventType {
+  CREATED
+  LABELED
+  PICKED_UP
+  ARRIVED_AT_HUB
+  DEPARTED_HUB
+  ARRIVED_AT_BRANCH
+  OUT_FOR_DELIVERY
+  DELIVERY_ATTEMPTED
+  DELIVERED
+  FAILED
+  RETURNED
+  HELD
+  EXCEPTION
+  CANCELLED
+}
+
+enum EventSource {
+  SYSTEM
+  DRIVER_APP
+  WAREHOUSE
+  PARTNER
+  CUSTOMER
+}
+
+enum DeliveryOutcome {
+  SUCCESS
+  FAILED
+  RESCHEDULED
+  REFUSED
+  PARTIAL
+}
+
+enum NotificationChannel {
+  SMS
+  EMAIL
+  PUSH
+  WHATSAPP
+  VOICE
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  OPTED_OUT
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ACCESS
+  EXPORT
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & Identity
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug      String
+  name      String
+  status    TenantStatus @default(ACTIVE)
+  config    Json         @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  users         User[]
+  roles         Role[]
+  addresses     Address[]
+  shipments     Shipment[]
+  shipmentItems    ShipmentItem[]
+  trackingEvents   TrackingEvent[]
+  deliveryAttempts DeliveryAttempt[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([status])
+  @@map("tenants")
+}
+
+model User {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String     @map("tenant_id") @db.Uuid
+  email        String
+  passwordHash String     @map("password_hash")
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  phone        String?
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(6)
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roles          UserRole[]
+  createdShipsAs Shipment[]     @relation("ShipmentCreatedBy")
+
+  @@index([tenantId, status])
+  @@index([tenantId, email])
+  @@map("users")
+}
+
+model Role {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String? @map("tenant_id") @db.Uuid
+  key         String
+  name        String
+  description String?
+  isSystem    Boolean @default(false) @map("is_system")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  tenant      Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  roles RolePermission[]
+
+  @@index([resource, action])
+  @@map("permissions")
+}
+
+model UserRole {
+  userId     String   @map("user_id") @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  assignedAt DateTime @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  assignedBy String?  @map("assigned_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Addresses
+// ---------------------------------------------------------------------------
+
+model Address {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String      @map("tenant_id") @db.Uuid
+  type         AddressType
+  contactName  String?     @map("contact_name")
+  contactPhone String?     @map("contact_phone")
+  line1        String
+  line2        String?
+  city         String
+  region       String?
+  postalCode   String?     @map("postal_code")
+  countryCode  String      @map("country_code") @db.Char(2)
+  latitude     Decimal?    @db.Decimal(9, 6)
+  longitude    Decimal?    @db.Decimal(9, 6)
+  metadata     Json        @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  tenant            Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  originShipments   Shipment[] @relation("ShipmentOrigin")
+  destinationShips  Shipment[] @relation("ShipmentDestination")
+
+  @@index([tenantId, type])
+  @@index([tenantId, countryCode, city])
+  @@map("addresses")
+}
+
+// ---------------------------------------------------------------------------
+// Shipments
+// ---------------------------------------------------------------------------
+
+model Shipment {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  awb           String
+  merchantId    String?        @map("merchant_id") @db.Uuid
+  originId      String         @map("origin_id") @db.Uuid
+  destinationId String         @map("destination_id") @db.Uuid
+  status        ShipmentStatus @default(DRAFT)
+  service       ServiceLevel   @default(STANDARD)
+  codAmount     Decimal        @default(0) @map("cod_amount") @db.Decimal(19, 4)
+  declaredValue Decimal        @default(0) @map("declared_value") @db.Decimal(19, 4)
+  currency      String         @default("SAR") @db.Char(3)
+  weightGrams   Int            @default(0) @map("weight_grams")
+  reference     String?
+  metadata      Json           @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdBy String?   @map("created_by") @db.Uuid
+  updatedBy String?   @map("updated_by") @db.Uuid
+  deletedBy String?   @map("deleted_by") @db.Uuid
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  origin           Address           @relation("ShipmentOrigin", fields: [originId], references: [id], onDelete: Restrict)
+  destination      Address           @relation("ShipmentDestination", fields: [destinationId], references: [id], onDelete: Restrict)
+  creator          User?             @relation("ShipmentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  items            ShipmentItem[]
+  trackingEvents   TrackingEvent[]
+  deliveryAttempts DeliveryAttempt[]
+  notifications    Notification[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, merchantId, createdAt])
+  @@index([tenantId, service])
+  @@map("shipments")
+}
+
+model ShipmentItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
+  shipmentId  String  @map("shipment_id") @db.Uuid
+  description String
+  sku         String?
+  quantity    Int     @default(1)
+  weightGrams Int     @default(0) @map("weight_grams")
+  unitValue   Decimal @default(0) @map("unit_value") @db.Decimal(19, 4)
+  hsCode      String? @map("hs_code")
+  metadata    Json    @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "shipment_items_tenant_fk")
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([shipmentId])
+  @@map("shipment_items")
+}
+
+model TrackingEvent {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String            @map("tenant_id") @db.Uuid
+  shipmentId  String            @map("shipment_id") @db.Uuid
+  type        TrackingEventType
+  source      EventSource       @default(SYSTEM)
+  description String?
+  latitude    Decimal?          @db.Decimal(9, 6)
+  longitude   Decimal?          @db.Decimal(9, 6)
+  occurredAt  DateTime          @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorId     String?           @map("actor_id") @db.Uuid
+  payload     Json              @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "tracking_events_tenant_fk")
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, shipmentId, occurredAt])
+  @@index([shipmentId, occurredAt])
+  @@index([type])
+  @@map("tracking_events")
+}
+
+model DeliveryAttempt {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String          @map("tenant_id") @db.Uuid
+  shipmentId   String          @map("shipment_id") @db.Uuid
+  attemptNo    Int             @map("attempt_no")
+  outcome      DeliveryOutcome
+  reasonCode   String?         @map("reason_code")
+  driverId     String?         @map("driver_id") @db.Uuid
+  latitude     Decimal?        @db.Decimal(9, 6)
+  longitude    Decimal?        @db.Decimal(9, 6)
+  podSignature String?         @map("pod_signature")
+  podPhotoUrl  String?         @map("pod_photo_url")
+  attemptedAt  DateTime        @default(now()) @map("attempted_at") @db.Timestamptz(6)
+  metadata     Json            @default("{}")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade, map: "delivery_attempts_tenant_fk")
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, attemptNo])
+  @@index([tenantId, shipmentId])
+  @@index([driverId])
+  @@map("delivery_attempts")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & Audit
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String              @map("tenant_id") @db.Uuid
+  shipmentId  String?             @map("shipment_id") @db.Uuid
+  channel     NotificationChannel
+  status      NotificationStatus  @default(QUEUED)
+  recipient   String
+  template    String
+  locale      String              @default("en")
+  payload     Json                @default("{}")
+  sentAt      DateTime?           @map("sent_at") @db.Timestamptz(6)
+  failedAt    DateTime?           @map("failed_at") @db.Timestamptz(6)
+  error       String?
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  shipment Shipment? @relation(fields: [shipmentId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, channel, createdAt])
+  @@index([shipmentId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String?     @map("tenant_id") @db.Uuid
+  actorId      String?     @map("actor_id") @db.Uuid
+  actorType    String      @default("user") @map("actor_type")
+  action       AuditAction
+  resourceType String      @map("resource_type")
+  resourceId   String?     @map("resource_id")
+  before       Json?
+  after        Json?
+  ipAddress    String?     @map("ip_address")
+  userAgent    String?     @map("user_agent")
+  requestId    String?     @map("request_id")
+  occurredAt   DateTime    @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}
