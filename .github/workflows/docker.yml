@@ -1,108 +1,98 @@
 name: Docker
 
 on:
-push:
-branches: [main]
-tags:
-- 'v*.*.*'
-workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
 
 permissions:
-contents: read
-packages: write
-security-events: write
+  contents: read
+  packages: write
+  security-events: write
 
 env:
-REGISTRY: ghcr.io
+  REGISTRY: ghcr.io
 
 jobs:
-build-push:
-name: Build & Push (${{ matrix.image.name }})
-runs-on: ubuntu-latest
-timeout-minutes: 40
+  build-push:
+    name: Build & push (${{ matrix.image.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - {
+              name: identity,
+              context: ./services/identity,
+              dockerfile: ./services/identity/Dockerfile,
+            }
+          - {
+              name: shipment,
+              context: ./services/shipment,
+              dockerfile: ./services/shipment/Dockerfile,
+            }
+          - {
+              name: tracking,
+              context: ./services/tracking,
+              dockerfile: ./services/tracking/Dockerfile,
+            }
+          - { name: web-merchant, context: ., dockerfile: ./apps/web-merchant/Dockerfile }
+          - { name: web-admin, context: ., dockerfile: ./apps/web-admin/Dockerfile }
+          - { name: web-driver, context: ., dockerfile: ./apps/web-driver/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
 
-```
-strategy:
-  fail-fast: false
-  matrix:
-    image:
-      - name: identity
-        context: ./services/identity
-        dockerfile: ./services/identity/Dockerfile
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: shipment
-        context: ./services/shipment
-        dockerfile: ./services/shipment/Dockerfile
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: tracking
-        context: ./services/tracking
-        dockerfile: ./services/tracking/Dockerfile
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
-      - name: web-merchant
-        context: .
-        dockerfile: ./apps/web-merchant/Dockerfile
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+          provenance: true
+          sbom: true
 
-      - name: web-admin
-        context: .
-        dockerfile: ./apps/web-admin/Dockerfile
+      - name: Trivy image scan
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image.name }}:sha-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-${{ matrix.image.name }}.sarif
 
-      - name: web-driver
-        context: .
-        dockerfile: ./apps/web-driver/Dockerfile
-
-steps:
-  - name: Checkout
-    uses: actions/checkout@v4
-
-  - name: Setup Docker Buildx
-    uses: docker/setup-buildx-action@v3
-
-  - name: Login to GHCR
-    uses: docker/login-action@v3
-    with:
-      registry: ${{ env.REGISTRY }}
-      username: ${{ github.actor }}
-      password: ${{ secrets.GITHUB_TOKEN }}
-
-  - name: Docker Metadata
-    id: meta
-    uses: docker/metadata-action@v5
-    with:
-      images: |
-        ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image.name }}
-      tags: |
-        type=ref,event=branch
-        type=sha,prefix=sha-
-        type=semver,pattern={{version}}
-        type=semver,pattern={{major}}.{{minor}}
-
-  - name: Build and Push
-    id: build
-    uses: docker/build-push-action@v6
-    with:
-      context: ${{ matrix.image.context }}
-      file: ${{ matrix.image.dockerfile }}
-      push: true
-      tags: ${{ steps.meta.outputs.tags }}
-      labels: ${{ steps.meta.outputs.labels }}
-      cache-from: type=gha,scope=${{ matrix.image.name }}
-      cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
-      provenance: true
-      sbom: true
-
-  - name: Trivy Image Scan
-    uses: aquasecurity/trivy-action@master
-    with:
-      scan-type: image
-      image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.image.name }}:sha-${{ github.sha }}
-      format: sarif
-      output: trivy-${{ matrix.image.name }}.sarif
-      severity: HIGH,CRITICAL
-      ignore-unfixed: true
-
-  - name: Upload SARIF
-    uses: github/codeql-action/upload-sarif@v3
-    with:
-      sarif_file: trivy-${{ matrix.image.name }}.sarif
-      category: trivy-image-${{ matrix.image.name }}
-```
+      - name: Upload image scan SARIF
+        if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image.name }}.sarif
+          category: trivy-image-${{ matrix.image.name }}
